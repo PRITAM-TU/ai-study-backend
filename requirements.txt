@@ -19,7 +19,7 @@ python-pptx==1.0.2
 
 # ── AI / ML ──
 sentence-transformers==4.1.0
-faiss-cpu==1.11.0
+faiss-cpu
 httpx==0.28.1
 
 # ── Audio ──
