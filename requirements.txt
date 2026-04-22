@@ -1,7 +1,7 @@
 # ── Core Framework ──
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-pydantic[email]==2.11.2
+pydantic[email]==1.10.13
 pydantic-settings==2.9.1
 
 # ── Database ──
