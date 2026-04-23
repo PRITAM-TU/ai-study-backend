@@ -6,6 +6,7 @@ Each user gets their own index to isolate data.
 
 import json
 import logging
+import asyncio
 import numpy as np
 import faiss
 from pathlib import Path
@@ -70,8 +71,8 @@ class VectorStoreManager:
         if not chunks:
             return
 
-        # Embed all chunks
-        embeddings = embed_texts(chunks)
+        # Embed all chunks — CPU-bound, run in thread pool to avoid blocking the event loop
+        embeddings = await asyncio.to_thread(embed_texts, chunks)
 
         # Load existing index
         index, metadata = self._load_index(user_id)
@@ -181,6 +182,7 @@ class VectorStoreManager:
         new_index = faiss.IndexFlatIP(self.dimension)
         if new_metadata:
             texts = [m["text"] for m in new_metadata]
+            # embed_texts is CPU-bound; call synchronously since remove_document is sync
             embeddings = embed_texts(texts)
             new_index.add(embeddings)
 

@@ -79,37 +79,26 @@ async def process_document(
         "status": "processing",
         "created_at": datetime.now(timezone.utc)
     }
-    
+
     result = await db.documents.insert_one(doc_dict)
     doc_id = str(result.inserted_id)
 
-    # We return the initial processing document right away.
-    # The actual processing will be scheduled via BackgroundTasks in the router.
+    # Return the initial record. Background processing will update it later.
     updated_doc = await db.documents.find_one({"_id": ObjectId(doc_id)})
     return _format_document(updated_doc), file_path, file_type
 
 
-def _run_ai_pipeline_sync(file_path: Path, file_type: str, doc_id: str, user_id: str):
-    """Synchronous CPU-bound pipeline."""
-    # Step 3: Parse text
+def _parse_and_chunk(file_path: Path, file_type: str) -> tuple[str, list[str]]:
+    """
+    CPU-bound: parse document and split into chunks.
+    Runs inside asyncio.to_thread so it doesn't block the event loop.
+    """
     text_content = parse_document(file_path, file_type)
-
-    # Step 4: Chunk and embed
     chunks = chunk_text(text_content)
-    chunk_count = len(chunks)
-
-    # Add chunks to vector store
-    vs_manager = VectorStoreManager()
-    
-    # We must run this synchronous code without awaiting since we're in a thread
-    # Wait, add_document_chunks is async! Let's check it.
-    # Ah! VectorStoreManager.add_document_chunks is an async function in vectorstore.py!
-    # If it's async, we can't run it inside a sync thread easily without asyncio.run.
     return text_content, chunks
 
 
 async def run_document_pipeline_background(
-    db: AsyncIOMotorDatabase,
     doc_id: str,
     user_id: str,
     file_path: Path,
@@ -118,38 +107,61 @@ async def run_document_pipeline_background(
 ):
     """
     Background task to process the document without blocking the event loop.
+
+    NOTE: We deliberately do NOT accept `db` as a parameter here because
+    FastAPI's Depends() generator is torn down after the response is sent.
+    Instead we obtain a fresh database handle directly from the client.
     """
+    # Import here to avoid circular-import issues
+    from app.database import get_db_direct
+
+    db = get_db_direct()
+
     try:
-        # Run CPU-bound parsing and chunking in a thread
+        logger.info(f"Background pipeline starting for doc={doc_id}, file={original_name}")
+
+        # Step 1: CPU-bound parsing and chunking (run in thread pool)
         text_content, chunks = await asyncio.to_thread(
-            _run_ai_pipeline_sync, file_path, file_type, doc_id, user_id
+            _parse_and_chunk, file_path, file_type
         )
         chunk_count = len(chunks)
+        logger.info(f"Parsed {chunk_count} chunks from {original_name}")
 
-        # Add chunks to vector store (async)
-        vs_manager = VectorStoreManager()
-        await vs_manager.add_document_chunks(
-            doc_id=doc_id,
-            user_id=user_id,
-            chunks=chunks,
-        )
+        # Step 2: Embed and store chunks in vector store
+        if chunks:
+            vs_manager = VectorStoreManager()
+            await vs_manager.add_document_chunks(
+                doc_id=doc_id,
+                user_id=user_id,
+                chunks=chunks,
+            )
+            logger.info(f"Stored {chunk_count} chunks in vector store for doc={doc_id}")
 
+        # Step 3: Mark document as ready in MongoDB
         await db.documents.update_one(
             {"_id": ObjectId(doc_id)},
             {"$set": {
                 "text_content": text_content,
                 "chunk_count": chunk_count,
-                "status": "ready"
+                "status": "ready",
+                "processed_at": datetime.now(timezone.utc),
             }}
         )
-        logger.info(f"Document processed: {original_name} ({chunk_count} chunks)")
+        logger.info(f"Document ready: {original_name} ({chunk_count} chunks)")
 
     except Exception as e:
-        await db.documents.update_one(
-            {"_id": ObjectId(doc_id)},
-            {"$set": {"status": "failed"}}
-        )
-        logger.error(f"Document processing failed: {e}")
+        logger.error(f"Document processing failed for doc={doc_id}: {e}", exc_info=True)
+        try:
+            await db.documents.update_one(
+                {"_id": ObjectId(doc_id)},
+                {"$set": {
+                    "status": "failed",
+                    "error_message": str(e),
+                    "processed_at": datetime.now(timezone.utc),
+                }}
+            )
+        except Exception as db_err:
+            logger.error(f"Failed to update error status in DB: {db_err}")
 
 
 async def get_user_documents(db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
@@ -185,4 +197,3 @@ async def delete_document(db: AsyncIOMotorDatabase, doc_id: str, user_id: str) -
     # Remove from DB
     await db.documents.delete_one({"_id": ObjectId(doc_id)})
     return True
-

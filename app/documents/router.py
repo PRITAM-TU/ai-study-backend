@@ -46,15 +46,16 @@ async def upload_document(
     try:
         doc, file_path, file_type = await process_document(db, current_user["id"], content, file.filename)
         
-        # Schedule the AI processing in the background
+        # Schedule the AI processing in the background.
+        # NOTE: We do NOT pass `db` here — the background task fetches its own
+        # database handle via get_db_direct() to avoid using a torn-down generator.
         background_tasks.add_task(
             run_document_pipeline_background,
-            db=db,
             doc_id=doc["id"],
             user_id=current_user["id"],
             file_path=file_path,
             file_type=file_type,
-            original_name=file.filename
+            original_name=file.filename,
         )
 
         return UploadResponse(
