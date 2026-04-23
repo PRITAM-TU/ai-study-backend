@@ -76,6 +76,7 @@ app.include_router(audio_router)
 @app.get("/", tags=["Health"])
 async def root():
     return {
+        
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "running",
