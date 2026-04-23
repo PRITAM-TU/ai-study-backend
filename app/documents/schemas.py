@@ -9,7 +9,7 @@ from typing import Optional
 
 class DocumentResponse(BaseModel):
     """Schema for document data in responses."""
-    id: int
+    id: str
     filename: str
     original_name: str
     file_type: str

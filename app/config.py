@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
 
     # ── Database ──
-    DATABASE_URL: str = "sqlite+aiosqlite:///./study_companion.db"
+    MONGODB_URL: str = "mongodb+srv://pritamtung03_db_user:LfkdyeIcdwKVD9dh@cluster0.4ahq9pc.mongodb.net/"
+    MONGODB_NAME: str = "ai_study_db"
 
     # ── LLM (Ollama) ──
     LLM_BASE_URL: str = "http://localhost:11434/v1"

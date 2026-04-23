@@ -5,12 +5,10 @@ Audio API endpoints: TTS, Voice Q&A.
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.database import get_db
 from app.auth.dependencies import get_current_user
-from app.auth.models import User
 from app.audio.tts_service import text_to_speech, get_available_voices
 from app.audio.stt_service import speech_to_text
 from app.rag.service import rag_query
@@ -33,7 +31,7 @@ class VoiceQAResponse(BaseModel):
 @router.post("/tts")
 async def create_tts(
     request: TTSRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Convert text to speech and return the audio file."""
     try:
@@ -52,7 +50,7 @@ async def create_tts(
 
 
 @router.get("/voices")
-async def list_voices(current_user: User = Depends(get_current_user)):
+async def list_voices(current_user: dict = Depends(get_current_user)):
     """List available TTS voices."""
     try:
         voices = await get_available_voices()
@@ -64,8 +62,8 @@ async def list_voices(current_user: User = Depends(get_current_user)):
 @router.post("/voice-qa")
 async def voice_question_answer(
     audio: UploadFile = File(...),
-    doc_id: Optional[int] = None,
-    current_user: User = Depends(get_current_user),
+    doc_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Voice Q&A pipeline:
@@ -87,7 +85,7 @@ async def voice_question_answer(
     # Step 2: RAG query
     try:
         rag_result = await rag_query(
-            user_id=current_user.id,
+            user_id=current_user["id"],
             question=transcription,
             doc_id=doc_id,
         )

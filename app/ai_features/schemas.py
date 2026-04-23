@@ -8,7 +8,7 @@ from typing import Optional
 
 # ── Summary ──
 class SummaryRequest(BaseModel):
-    doc_id: int
+    doc_id: str
     max_length: Optional[int] = None
 
 
@@ -32,7 +32,7 @@ class SummaryResponse(BaseModel):
 
 # ── Quiz ──
 class QuizRequest(BaseModel):
-    doc_id: int
+    doc_id: str
     num_questions: int = Field(default=10, ge=3, le=30)
     difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
 
@@ -67,7 +67,7 @@ class QuizResult(BaseModel):
 
 # ── Flashcards ──
 class FlashcardRequest(BaseModel):
-    doc_id: int
+    doc_id: str
     num_cards: int = Field(default=15, ge=5, le=50)
 
 
@@ -86,7 +86,7 @@ class FlashcardResponse(BaseModel):
 
 # ── Exam Mode ──
 class ExamRequest(BaseModel):
-    doc_id: int
+    doc_id: str
 
 
 class ImportantTopic(BaseModel):

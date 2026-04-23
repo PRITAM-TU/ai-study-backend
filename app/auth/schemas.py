@@ -23,7 +23,7 @@ class UserLogin(BaseModel):
 
 class UserResponse(BaseModel):
     """Schema for user data in responses."""
-    id: int
+    id: str
     email: str
     username: str
     full_name: Optional[str] = None
@@ -42,5 +42,5 @@ class TokenResponse(BaseModel):
 
 class TokenData(BaseModel):
     """Schema for decoded JWT token data."""
-    user_id: int
+    user_id: str
     email: str

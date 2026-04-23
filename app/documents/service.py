@@ -5,12 +5,12 @@ Document service: handles upload, parsing, and storage logic.
 import uuid
 import logging
 from pathlib import Path
+from datetime import datetime, timezone
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from bson import ObjectId
 
 from app.config import get_settings
-from app.documents.models import Document
 from app.documents.parser import parse_document
 from app.rag.chunker import chunk_text
 from app.rag.vectorstore import VectorStoreManager
@@ -43,12 +43,19 @@ async def save_uploaded_file(file_content: bytes, original_name: str) -> tuple[P
     return file_path, file_type
 
 
+def _format_document(doc: dict | None) -> dict | None:
+    if not doc:
+        return None
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
 async def process_document(
-    db: AsyncSession,
-    user_id: int,
+    db: AsyncIOMotorDatabase,
+    user_id: str,
     file_content: bytes,
     original_name: str,
-) -> Document:
+) -> dict:
     """
     Full document processing pipeline:
     1. Save file to disk
@@ -60,69 +67,75 @@ async def process_document(
     file_path, file_type = await save_uploaded_file(file_content, original_name)
 
     # Step 2: Create document record (status: processing)
-    doc = Document(
-        user_id=user_id,
-        filename=file_path.name,
-        original_name=original_name,
-        file_type=file_type,
-        file_size=len(file_content),
-        status="processing",
-    )
-    db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
+    doc_dict = {
+        "user_id": user_id,
+        "filename": file_path.name,
+        "original_name": original_name,
+        "file_type": file_type,
+        "file_size": len(file_content),
+        "text_content": None,
+        "chunk_count": 0,
+        "status": "processing",
+        "created_at": datetime.now(timezone.utc)
+    }
+    
+    result = await db.documents.insert_one(doc_dict)
+    doc_id = str(result.inserted_id)
 
     try:
         # Step 3: Parse text
         text_content = parse_document(file_path, file_type)
-        doc.text_content = text_content
 
         # Step 4: Chunk and embed
         chunks = chunk_text(text_content)
-        doc.chunk_count = len(chunks)
+        chunk_count = len(chunks)
 
         # Add chunks to vector store
         vs_manager = VectorStoreManager()
         await vs_manager.add_document_chunks(
-            doc_id=doc.id,
+            doc_id=doc_id,
             user_id=user_id,
             chunks=chunks,
         )
 
-        doc.status = "ready"
-        logger.info(f"Document processed: {original_name} ({len(chunks)} chunks)")
+        await db.documents.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": {
+                "text_content": text_content,
+                "chunk_count": chunk_count,
+                "status": "ready"
+            }}
+        )
+        logger.info(f"Document processed: {original_name} ({chunk_count} chunks)")
 
     except Exception as e:
-        doc.status = "failed"
+        await db.documents.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": {"status": "failed"}}
+        )
         logger.error(f"Document processing failed: {e}")
         raise
 
-    finally:
-        await db.commit()
-        await db.refresh(doc)
-
-    return doc
+    updated_doc = await db.documents.find_one({"_id": ObjectId(doc_id)})
+    return _format_document(updated_doc)
 
 
-async def get_user_documents(db: AsyncSession, user_id: int) -> list[Document]:
+async def get_user_documents(db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
     """Get all documents for a user."""
-    result = await db.execute(
-        select(Document)
-        .where(Document.user_id == user_id)
-        .order_by(Document.created_at.desc())
-    )
-    return list(result.scalars().all())
+    cursor = db.documents.find({"user_id": user_id}).sort("created_at", -1)
+    documents = await cursor.to_list(length=1000)
+    return [_format_document(doc) for doc in documents]
 
 
-async def get_document_by_id(db: AsyncSession, doc_id: int, user_id: int) -> Document | None:
+async def get_document_by_id(db: AsyncIOMotorDatabase, doc_id: str, user_id: str) -> dict | None:
     """Get a specific document by ID, scoped to user."""
-    result = await db.execute(
-        select(Document).where(Document.id == doc_id, Document.user_id == user_id)
-    )
-    return result.scalar_one_or_none()
+    if not ObjectId.is_valid(doc_id):
+        return None
+    doc = await db.documents.find_one({"_id": ObjectId(doc_id), "user_id": user_id})
+    return _format_document(doc)
 
 
-async def delete_document(db: AsyncSession, doc_id: int, user_id: int) -> bool:
+async def delete_document(db: AsyncIOMotorDatabase, doc_id: str, user_id: str) -> bool:
     """Delete a document and its vector store data."""
     doc = await get_document_by_id(db, doc_id, user_id)
     if not doc:
@@ -133,11 +146,11 @@ async def delete_document(db: AsyncSession, doc_id: int, user_id: int) -> bool:
     vs_manager.remove_document(doc_id, user_id)
 
     # Remove file from disk
-    file_path = settings.UPLOAD_DIR / doc.filename
+    file_path = settings.UPLOAD_DIR / doc["filename"]
     if file_path.exists():
         file_path.unlink()
 
     # Remove from DB
-    await db.delete(doc)
-    await db.commit()
+    await db.documents.delete_one({"_id": ObjectId(doc_id)})
     return True
+

@@ -26,13 +26,13 @@ class VectorStoreManager:
         self.store_dir.mkdir(parents=True, exist_ok=True)
         self.dimension = settings.EMBEDDING_DIMENSION
 
-    def _index_path(self, user_id: int) -> Path:
+    def _index_path(self, user_id: str) -> Path:
         return self.store_dir / f"user_{user_id}.index"
 
-    def _metadata_path(self, user_id: int) -> Path:
+    def _metadata_path(self, user_id: str) -> Path:
         return self.store_dir / f"user_{user_id}_meta.json"
 
-    def _load_index(self, user_id: int) -> tuple[faiss.IndexFlatIP, list[dict]]:
+    def _load_index(self, user_id: str) -> tuple[faiss.IndexFlatIP, list[dict]]:
         """Load existing FAISS index and metadata for a user."""
         index_path = self._index_path(user_id)
         meta_path = self._metadata_path(user_id)
@@ -47,7 +47,7 @@ class VectorStoreManager:
             index = faiss.IndexFlatIP(self.dimension)
             return index, []
 
-    def _save_index(self, user_id: int, index: faiss.IndexFlatIP, metadata: list[dict]):
+    def _save_index(self, user_id: str, index: faiss.IndexFlatIP, metadata: list[dict]):
         """Persist FAISS index and metadata to disk."""
         faiss.write_index(index, str(self._index_path(user_id)))
         with open(self._metadata_path(user_id), "w", encoding="utf-8") as f:
@@ -55,8 +55,8 @@ class VectorStoreManager:
 
     async def add_document_chunks(
         self,
-        doc_id: int,
-        user_id: int,
+        doc_id: str,
+        user_id: str,
         chunks: list[str],
     ):
         """
@@ -93,10 +93,10 @@ class VectorStoreManager:
 
     def search(
         self,
-        user_id: int,
+        user_id: str,
         query: str,
         top_k: int | None = None,
-        doc_id: int | None = None,
+        doc_id: str | None = None,
     ) -> list[dict]:
         """
         Search the user's vector store for relevant chunks.
@@ -144,7 +144,7 @@ class VectorStoreManager:
 
         return results
 
-    def get_all_chunks(self, user_id: int, doc_id: int) -> list[str]:
+    def get_all_chunks(self, user_id: str, doc_id: str) -> list[str]:
         """Get all text chunks for a specific document."""
         _, metadata = self._load_index(user_id)
         chunks = [
@@ -155,7 +155,7 @@ class VectorStoreManager:
             m["text"] for m in metadata if m["doc_id"] == doc_id
         ].index(x) if x in [m["text"] for m in metadata if m["doc_id"] == doc_id] else 0])
 
-    def get_document_text(self, user_id: int, doc_id: int) -> str:
+    def get_document_text(self, user_id: str, doc_id: str) -> str:
         """Get the full reconstructed text for a document from its chunks."""
         _, metadata = self._load_index(user_id)
         doc_chunks = sorted(
@@ -164,7 +164,7 @@ class VectorStoreManager:
         )
         return "\n\n".join(c["text"] for c in doc_chunks)
 
-    def remove_document(self, doc_id: int, user_id: int):
+    def remove_document(self, doc_id: str, user_id: str):
         """
         Remove all chunks for a document from the vector store.
         Note: FAISS doesn't support deletion, so we rebuild the index.
