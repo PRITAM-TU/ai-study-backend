@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     WHISPER_MODEL: str = "tiny"
 
     # ── CORS ──
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["https://ai-study-frontend-ochre.vercel.app", "https://ai-study-backend-4gl8.onrender.com"]
 
     model_config = {
         "env_file": ".env",
