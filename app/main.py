@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.database import init_db
 
 # Import all routers
 from app.auth.router import router as auth_router
@@ -40,9 +39,7 @@ async def lifespan(app: FastAPI):
     settings.AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     settings.VECTOR_STORE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
+
 
     yield
 

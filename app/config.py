@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
 
     # ── Database ──
-    MONGODB_URL: str = "mongodb+srv://pritamtung03_db_user:LfkdyeIcdwKVD9dh@cluster0.4ahq9pc.mongodb.net/"
+    MONGODB_URL: str
     MONGODB_NAME: str = "ai_study_db"
 
     # ── LLM (Ollama) ──
