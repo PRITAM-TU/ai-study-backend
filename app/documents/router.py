@@ -2,13 +2,13 @@
 Document upload and management endpoints.
 """
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, BackgroundTasks
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.database import get_db
 from app.auth.dependencies import get_current_user
 from app.documents.schemas import DocumentResponse, DocumentListResponse, UploadResponse
-from app.documents.service import process_document, get_user_documents, delete_document
+from app.documents.service import process_document, run_document_pipeline_background, get_user_documents, delete_document
 from app.config import get_settings
 
 settings = get_settings()
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncIOMotorDatabase = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -43,9 +44,21 @@ async def upload_document(
         )
 
     try:
-        doc = await process_document(db, current_user["id"], content, file.filename)
+        doc, file_path, file_type = await process_document(db, current_user["id"], content, file.filename)
+        
+        # Schedule the AI processing in the background
+        background_tasks.add_task(
+            run_document_pipeline_background,
+            db=db,
+            doc_id=doc["id"],
+            user_id=current_user["id"],
+            file_path=file_path,
+            file_type=file_type,
+            original_name=file.filename
+        )
+
         return UploadResponse(
-            message="Document uploaded and processed successfully",
+            message="Document uploaded and processing started in background",
             document=DocumentResponse.model_validate(doc),
         )
     except ValueError as e:

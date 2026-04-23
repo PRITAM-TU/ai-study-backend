@@ -4,6 +4,7 @@ Document service: handles upload, parsing, and storage logic.
 
 import uuid
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -82,15 +83,50 @@ async def process_document(
     result = await db.documents.insert_one(doc_dict)
     doc_id = str(result.inserted_id)
 
-    try:
-        # Step 3: Parse text
-        text_content = parse_document(file_path, file_type)
+    # We return the initial processing document right away.
+    # The actual processing will be scheduled via BackgroundTasks in the router.
+    updated_doc = await db.documents.find_one({"_id": ObjectId(doc_id)})
+    return _format_document(updated_doc), file_path, file_type
 
-        # Step 4: Chunk and embed
-        chunks = chunk_text(text_content)
+
+def _run_ai_pipeline_sync(file_path: Path, file_type: str, doc_id: str, user_id: str):
+    """Synchronous CPU-bound pipeline."""
+    # Step 3: Parse text
+    text_content = parse_document(file_path, file_type)
+
+    # Step 4: Chunk and embed
+    chunks = chunk_text(text_content)
+    chunk_count = len(chunks)
+
+    # Add chunks to vector store
+    vs_manager = VectorStoreManager()
+    
+    # We must run this synchronous code without awaiting since we're in a thread
+    # Wait, add_document_chunks is async! Let's check it.
+    # Ah! VectorStoreManager.add_document_chunks is an async function in vectorstore.py!
+    # If it's async, we can't run it inside a sync thread easily without asyncio.run.
+    return text_content, chunks
+
+
+async def run_document_pipeline_background(
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    user_id: str,
+    file_path: Path,
+    file_type: str,
+    original_name: str,
+):
+    """
+    Background task to process the document without blocking the event loop.
+    """
+    try:
+        # Run CPU-bound parsing and chunking in a thread
+        text_content, chunks = await asyncio.to_thread(
+            _run_ai_pipeline_sync, file_path, file_type, doc_id, user_id
+        )
         chunk_count = len(chunks)
 
-        # Add chunks to vector store
+        # Add chunks to vector store (async)
         vs_manager = VectorStoreManager()
         await vs_manager.add_document_chunks(
             doc_id=doc_id,
@@ -114,10 +150,6 @@ async def process_document(
             {"$set": {"status": "failed"}}
         )
         logger.error(f"Document processing failed: {e}")
-        raise
-
-    updated_doc = await db.documents.find_one({"_id": ObjectId(doc_id)})
-    return _format_document(updated_doc)
 
 
 async def get_user_documents(db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
